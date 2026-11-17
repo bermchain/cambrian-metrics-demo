@@ -1,0 +1,80 @@
+name: Update metrics page
+
+on:
+  schedule:
+    - cron: "17 5 * * *"   # daily at 05:17 UTC
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  actions: write            # used once, to switch this workflow off after expiry
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  EXPIRES_ON: "2026-12-17"  # last day the page is live (YYYY-MM-DD, UTC)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check expiry
+        id: gate
+        run: |
+          if [[ "$(date -u +%F)" > "$EXPIRES_ON" ]]; then echo "expired=true" >> "$GITHUB_OUTPUT"; else echo "expired=false" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore last good values
+        if: steps.gate.outputs.expired == 'false'
+        uses: actions/cache@v4
+        with:
+          path: state.json.enc
+          key: metrics-state-${{ github.run_id }}
+          restore-keys: metrics-state-
+
+      - name: Fetch metrics and build encrypted page
+        if: steps.gate.outputs.expired == 'false'
+        env:
+          CAMBRIAN_API_KEY: ${{ secrets.CAMBRIAN_API_KEY }}
+          PAGE_PASSWORD: ${{ secrets.PAGE_PASSWORD }}
+        run: |
+          pip install --quiet cryptography
+          if [ -f state.json.enc ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -pass env:PAGE_PASSWORD -in state.json.enc -out state.json || rm -f state.json
+          fi
+          python fetch_metrics.py
+          python build_page.py
+          openssl enc -aes-256-cbc -pbkdf2 -pass env:PAGE_PASSWORD -in state.json -out state.json.enc
+          rm -f state.json metrics.json
+
+      - name: Build expired placeholder
+        if: steps.gate.outputs.expired == 'true'
+        run: python build_page.py --expired
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Self-destruct (switch off after expiry)
+        if: steps.gate.outputs.expired == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X DELETE "repos/${{ github.repository }}/pages" || echo "Could not remove the Pages site automatically; the placeholder stays up."
+          gh workflow disable update.yml --repo "${{ github.repository }}"
