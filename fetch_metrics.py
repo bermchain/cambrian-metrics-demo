@@ -146,14 +146,15 @@ def solana_volume_7d():
 
 
 def floor_display(value, kind):
+    """Round down and spell out the unit, e.g. 2.8 million+, $37 billion+, 15,000+."""
     if value is None:
-        return "—"
+        return "\u2014"
     if kind == "usd_b":
-        return f"${int(value // 1e9)}B+"
+        return f"${int(value // 1e9)} billion+"
     if kind == "m1":  # one decimal, in millions, rounded down
-        return f"{int(value // 1e5) / 10:g}M+"
+        return f"{int(value // 1e5) / 10:g} million+"
     if kind == "m0":
-        return f"{int(value // 1e6)}M+"
+        return f"{int(value // 1e6)} million+"
     if kind == "k":
         return f"{int(value // 1000) * 1000:,}+"
     return str(value)
@@ -167,7 +168,7 @@ GROUPS = {
                       lambda: {**{f"vol:{ch}": (lambda ch=ch: evm_volume_7d(ch)) for ch in EVM_CHAINS},
                                "vol:solana": solana_volume_7d}),
     "tokens": ("Tokens & tokenized stocks", "m0", token_sources),
-    "lending_markets": ("Lending markets & vaults indexed", "k",
+    "lending_markets": ("Lending pools & vaults indexed", "k",
                         lambda: {f"lendcount:{ch}": (lambda ch=ch: lending_count(ch)) for ch in EVM_CHAINS}),
 }
 
